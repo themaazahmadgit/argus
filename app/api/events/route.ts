@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { IntelEvent } from '@/types'
 import { getCache, setCache } from '@/lib/cache'
 import { fetchGDELTEvents } from '@/lib/gdelt'
+import { haversineDistance } from '@/lib/haversine'
 
 const STATIC_FALLBACK: IntelEvent[] = [
   { id: 's1', source: 'usgs', category: 'earthquake', title: '6.2 Magnitude Earthquake — Eastern Turkey', summary: 'USGS reports 6.2 magnitude event near Erzincan, Turkey. Damage reports emerging.', lat: 39.7, lon: 39.5, country: 'Turkey', countryCode: 'TR', severity: 'high', timestamp: new Date(Date.now()-1800000).toISOString(), url: 'https://earthquake.usgs.gov' },
@@ -169,19 +170,281 @@ function extractCountryFromPlace(place: string): string {
   return parts[parts.length - 1]?.trim() || 'Unknown'
 }
 
+// ── WHO Disease Outbreaks ────────────────────────────────────────────────────
+async function fetchWHO(): Promise<IntelEvent[]> {
+  try {
+    const res = await fetch('https://www.who.int/feeds/entity/don/en/rss.xml', { signal: AbortSignal.timeout(8000) })
+    if (!res.ok) return []
+    const text = await res.text()
+    const items = text.match(/<item>([\s\S]*?)<\/item>/g) || []
+    return items.slice(0, 15).map((item, i) => {
+      const title = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1] || item.match(/<title>(.*?)<\/title>/)?.[1] || 'WHO Alert'
+      const link = item.match(/<link>(.*?)<\/link>/)?.[1] || 'https://who.int'
+      const pubDate = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || new Date().toISOString()
+      const geo = inferGeoFromTitleWHO(title)
+      return {
+        id: `who-${i}-${Date.now()}`,
+        source: 'who' as const,
+        category: 'health' as const,
+        title: title.slice(0, 120),
+        summary: `WHO Disease Outbreak Notice: ${title}`,
+        lat: geo.lat,
+        lon: geo.lon,
+        country: geo.country,
+        countryCode: geo.countryCode,
+        severity: 'high' as const,
+        timestamp: new Date(pubDate).toISOString(),
+        url: link,
+      }
+    }).filter(e => e.lat !== 0 && e.lon !== 0)
+  } catch { return [] }
+}
+
+// ── NASA FIRMS Wildfires ─────────────────────────────────────────────────────
+async function fetchNASAFIRMS(): Promise<IntelEvent[]> {
+  const key = process.env.NASA_FIRMS_KEY
+  if (!key) return []
+  try {
+    const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${key}/VIIRS_SNPP_NRT/world/1`
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+    if (!res.ok) return []
+    const text = await res.text()
+    const lines = text.split('\n').slice(1).filter(Boolean)
+
+    // Parse CSV rows
+    const fires: { lat: number; lon: number; brightness: number; confidence: number; date: string }[] = []
+    for (const line of lines) {
+      const parts = line.split(',')
+      const lat = parseFloat(parts[0])
+      const lon = parseFloat(parts[1])
+      const brightness = parseFloat(parts[2])
+      const confidence = parseInt(parts[8] || '0', 10)
+      const date = parts[5] || new Date().toISOString().slice(0, 10)
+      if (isNaN(lat) || isNaN(lon) || confidence < 80) continue
+      fires.push({ lat, lon, brightness, confidence, date })
+    }
+
+    // Cluster fires within 50km
+    const clusters: typeof fires[] = []
+    const used = new Set<number>()
+    for (let i = 0; i < fires.length; i++) {
+      if (used.has(i)) continue
+      const cluster = [fires[i]]
+      used.add(i)
+      for (let j = i + 1; j < fires.length; j++) {
+        if (used.has(j)) continue
+        if (haversineDistance(fires[i].lat, fires[i].lon, fires[j].lat, fires[j].lon) < 50) {
+          cluster.push(fires[j])
+          used.add(j)
+        }
+      }
+      clusters.push(cluster)
+    }
+
+    return clusters.slice(0, 20).map((cluster, i) => {
+      const center = cluster[0]
+      const maxBright = Math.max(...cluster.map(f => f.brightness))
+      const geo = inferGeoFromTitleWHO(`fire at ${center.lat},${center.lon}`)
+      const sev: IntelEvent['severity'] = maxBright > 400 ? 'critical' : maxBright > 350 ? 'high' : 'medium'
+      return {
+        id: `firms-${i}-${Date.now()}`,
+        source: 'firms' as const,
+        category: 'wildfire' as const,
+        title: `Wildfire Cluster — ${cluster.length} hotspots (${center.lat.toFixed(1)}°, ${center.lon.toFixed(1)}°)`,
+        summary: `NASA VIIRS detects ${cluster.length} active fire hotspots. Max brightness: ${maxBright.toFixed(0)}K. Confidence: high.`,
+        lat: center.lat,
+        lon: center.lon,
+        country: geo.country,
+        countryCode: geo.countryCode,
+        severity: sev,
+        timestamp: new Date(center.date).toISOString(),
+        url: 'https://firms.modaps.eosdis.nasa.gov',
+      }
+    })
+  } catch { return [] }
+}
+
+// ── RSS News Aggregator ──────────────────────────────────────────────────────
+const RSS_FEEDS = [
+  'https://www.aljazeera.com/xml/rss/all.xml',
+  'https://feeds.bbci.co.uk/news/world/rss.xml',
+  'https://rss.nytimes.com/services/xml/rss/nyt/World.xml',
+  'https://www.france24.com/en/rss',
+  'https://www.dw.com/rss/en/all/rss-en-all',
+  'https://www.middleeasteye.net/rss',
+  'https://www.crisisgroup.org/feed',
+  'https://www.dawn.com/feeds/home',
+  'https://www.rt.com/rss/news/',
+  'http://feeds.reuters.com/Reuters/worldNews',
+]
+
+const CRISIS_KEYWORDS = /kill|dead|attack|bomb|missile|war|strike|clash|military|troops|rebel|coup|protest|tension|sanction|crisis|explosion|hostage|terror|invasion|ceasefire|drone|nuclear|siege/i
+
+async function fetchRSSFeeds(): Promise<IntelEvent[]> {
+  try {
+    const results = await Promise.allSettled(
+      RSS_FEEDS.map(feed =>
+        fetch(feed, { signal: AbortSignal.timeout(6000), headers: { 'User-Agent': 'ARGUS/1.0' } })
+          .then(r => r.ok ? r.text() : Promise.reject())
+      )
+    )
+    const events: IntelEvent[] = []
+    results.forEach((result, feedIdx) => {
+      if (result.status !== 'fulfilled') return
+      const text = result.value
+      const items = text.match(/<item>([\s\S]*?)<\/item>/g) || []
+      items.slice(0, 10).forEach((item, i) => {
+        const title = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1] || item.match(/<title>(.*?)<\/title>/)?.[1] || ''
+        if (!title || !CRISIS_KEYWORDS.test(title)) return
+        const link = item.match(/<link>(.*?)<\/link>/)?.[1] || ''
+        const pubDate = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || new Date().toISOString()
+        const geo = inferGeoFromTitleWHO(title)
+        if (geo.lat === 0 && geo.lon === 0) return
+        events.push({
+          id: `rss-${feedIdx}-${i}-${Date.now()}`,
+          source: 'rss' as const,
+          category: inferCategoryRSS(title),
+          title: title.slice(0, 120),
+          summary: `News intelligence: ${title}`,
+          lat: geo.lat,
+          lon: geo.lon,
+          country: geo.country,
+          countryCode: geo.countryCode,
+          severity: inferSeverityRSS(title),
+          timestamp: new Date(pubDate).toISOString(),
+          url: link,
+        })
+      })
+    })
+    return events
+  } catch { return [] }
+}
+
+// ── ACLED (conditional) ──────────────────────────────────────────────────────
+async function fetchACLED(): Promise<IntelEvent[]> {
+  const email = process.env.ACLED_EMAIL
+  const key = process.env.ACLED_PASSWORD
+  if (!email || !key) return []
+  try {
+    const url = `https://api.acleddata.com/acled/read?key=${key}&email=${email}&limit=100`
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    if (!res.ok) return []
+    const data = await res.json()
+    const ACLED_SEVERITY: Record<string, IntelEvent['severity']> = {
+      'Battles': 'critical',
+      'Violence against civilians': 'critical',
+      'Explosions/Remote violence': 'high',
+      'Riots': 'high',
+      'Protests': 'medium',
+      'Strategic developments': 'low',
+    }
+    return (data.data || []).slice(0, 50).map((e: Record<string, unknown>, i: number) => ({
+      id: `acled-${i}-${Date.now()}`,
+      source: 'acled' as const,
+      category: 'conflict' as const,
+      title: `${e.event_type} — ${e.country}: ${e.actor1}`,
+      summary: String(e.notes || `ACLED records ${e.event_type} event in ${e.country}.`).slice(0, 200),
+      lat: Number(e.latitude) || 0,
+      lon: Number(e.longitude) || 0,
+      country: String(e.country || 'Unknown'),
+      countryCode: 'XX',
+      severity: ACLED_SEVERITY[String(e.event_type)] || 'medium',
+      timestamp: new Date(String(e.event_date)).toISOString(),
+      url: 'https://acleddata.com',
+      fatalities: Number(e.fatalities) || 0,
+    })).filter((e: IntelEvent) => e.lat !== 0 && e.lon !== 0)
+  } catch { return [] }
+}
+
+// ── Shared geo inference (reuses COUNTRY_GEO logic from gdelt.ts) ────────────
+const GEO_MAP: Record<string, { country: string; countryCode: string; lat: number; lon: number }> = {
+  ukraine: { country: 'Ukraine', countryCode: 'UA', lat: 48.5, lon: 31.0 },
+  russia: { country: 'Russia', countryCode: 'RU', lat: 60.0, lon: 90.0 },
+  israel: { country: 'Israel', countryCode: 'IL', lat: 31.5, lon: 34.9 },
+  gaza: { country: 'Palestine', countryCode: 'PS', lat: 31.4, lon: 34.3 },
+  palestine: { country: 'Palestine', countryCode: 'PS', lat: 31.9, lon: 35.2 },
+  iran: { country: 'Iran', countryCode: 'IR', lat: 32.4, lon: 53.7 },
+  china: { country: 'China', countryCode: 'CN', lat: 35.0, lon: 105.0 },
+  taiwan: { country: 'Taiwan', countryCode: 'TW', lat: 23.7, lon: 121.0 },
+  myanmar: { country: 'Myanmar', countryCode: 'MM', lat: 17.0, lon: 96.0 },
+  sudan: { country: 'Sudan', countryCode: 'SD', lat: 15.5, lon: 32.5 },
+  ethiopia: { country: 'Ethiopia', countryCode: 'ET', lat: 9.1, lon: 40.5 },
+  somalia: { country: 'Somalia', countryCode: 'SO', lat: 5.0, lon: 45.0 },
+  yemen: { country: 'Yemen', countryCode: 'YE', lat: 15.5, lon: 48.5 },
+  syria: { country: 'Syria', countryCode: 'SY', lat: 35.0, lon: 38.0 },
+  iraq: { country: 'Iraq', countryCode: 'IQ', lat: 33.2, lon: 43.7 },
+  lebanon: { country: 'Lebanon', countryCode: 'LB', lat: 33.9, lon: 35.9 },
+  pakistan: { country: 'Pakistan', countryCode: 'PK', lat: 30.0, lon: 70.0 },
+  afghanistan: { country: 'Afghanistan', countryCode: 'AF', lat: 33.9, lon: 67.7 },
+  nigeria: { country: 'Nigeria', countryCode: 'NG', lat: 9.1, lon: 8.7 },
+  mali: { country: 'Mali', countryCode: 'ML', lat: 17.6, lon: -4.0 },
+  venezuela: { country: 'Venezuela', countryCode: 'VE', lat: 6.4, lon: -66.6 },
+  colombia: { country: 'Colombia', countryCode: 'CO', lat: 4.6, lon: -74.1 },
+  mexico: { country: 'Mexico', countryCode: 'MX', lat: 23.6, lon: -102.6 },
+  'north korea': { country: 'North Korea', countryCode: 'KP', lat: 40.3, lon: 127.5 },
+  india: { country: 'India', countryCode: 'IN', lat: 20.6, lon: 78.9 },
+  turkey: { country: 'Turkey', countryCode: 'TR', lat: 38.9, lon: 35.2 },
+  egypt: { country: 'Egypt', countryCode: 'EG', lat: 26.8, lon: 30.8 },
+  libya: { country: 'Libya', countryCode: 'LY', lat: 26.3, lon: 17.2 },
+  congo: { country: 'DR Congo', countryCode: 'CD', lat: -4.0, lon: 21.8 },
+  haiti: { country: 'Haiti', countryCode: 'HT', lat: 18.9, lon: -72.3 },
+  'saudi arabia': { country: 'Saudi Arabia', countryCode: 'SA', lat: 24.7, lon: 46.7 },
+  'south sudan': { country: 'South Sudan', countryCode: 'SS', lat: 6.9, lon: 31.3 },
+  chad: { country: 'Chad', countryCode: 'TD', lat: 15.5, lon: 18.7 },
+  kenya: { country: 'Kenya', countryCode: 'KE', lat: -1.3, lon: 36.8 },
+  bangladesh: { country: 'Bangladesh', countryCode: 'BD', lat: 23.7, lon: 90.4 },
+  philippines: { country: 'Philippines', countryCode: 'PH', lat: 12.9, lon: 121.8 },
+  indonesia: { country: 'Indonesia', countryCode: 'ID', lat: -0.8, lon: 113.9 },
+}
+
+function inferGeoFromTitleWHO(title: string): { country: string; countryCode: string; lat: number; lon: number } {
+  const t = title.toLowerCase()
+  for (const [key, geo] of Object.entries(GEO_MAP)) {
+    if (t.includes(key)) {
+      const jitter = (Math.random() - 0.5) * 1.5
+      return { ...geo, lat: geo.lat + jitter, lon: geo.lon + jitter }
+    }
+  }
+  return { country: 'Unknown', countryCode: 'XX', lat: 0, lon: 0 }
+}
+
+function inferSeverityRSS(title: string): IntelEvent['severity'] {
+  const t = title.toLowerCase()
+  if (/kill|dead|bomb|attack|missile|explosion|massacre|invasion|nuclear/.test(t)) return 'critical'
+  if (/conflict|clash|military|troops|rebel|coup|hostage|terror|siege/.test(t)) return 'high'
+  if (/protest|tension|sanction|crisis|ceasefire|drone/.test(t)) return 'medium'
+  return 'low'
+}
+
+function inferCategoryRSS(title: string): IntelEvent['category'] {
+  const t = title.toLowerCase()
+  if (/disease|outbreak|virus|epidemic|health/.test(t)) return 'health'
+  if (/refugee|humanitarian|famine|food/.test(t)) return 'humanitarian'
+  if (/election|government|president|coup|protest/.test(t)) return 'political'
+  if (/economy|sanction|trade|oil|currency/.test(t)) return 'economic'
+  return 'conflict'
+}
+
 export async function GET() {
   const cached = getCache<IntelEvent[]>('all-events')
   if (cached) return NextResponse.json(cached)
 
-  const [gdeltEvents, usgsEvents, gdacsEvents, reliefwebEvents, ucdpEvents] = await Promise.all([
+  const [gdeltEvents, usgsEvents, gdacsEvents, reliefwebEvents, ucdpEvents,
+         whoEvents, firmsEvents, rssEvents, acledEvents] = await Promise.all([
     fetchGDELTEvents(),
     fetchUSGSEarthquakes(),
     fetchGDACS(),
     fetchReliefWeb(),
     fetchUCDP(),
+    fetchWHO(),
+    fetchNASAFIRMS(),
+    fetchRSSFeeds(),
+    fetchACLED(),
   ])
 
-  let all = [...STATIC_FALLBACK, ...gdeltEvents, ...usgsEvents, ...gdacsEvents, ...reliefwebEvents, ...ucdpEvents]
+  let all = [...STATIC_FALLBACK, ...gdeltEvents, ...usgsEvents, ...gdacsEvents,
+             ...reliefwebEvents, ...ucdpEvents, ...whoEvents, ...firmsEvents,
+             ...rssEvents, ...acledEvents]
   all = deduplicateEvents(all)
   all.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
 

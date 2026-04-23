@@ -1,6 +1,6 @@
 import { IntelEvent, CorrelationAlert } from '@/types'
 import { haversineDistance } from './haversine'
-import { CHOKEPOINTS } from './constants'
+import { CHOKEPOINTS, COUNTRY_NEIGHBORS } from './constants'
 
 function makeId(pattern: string, country: string): string {
   const hash = `${pattern}-${country}-${new Date().toDateString()}`
@@ -185,6 +185,73 @@ export function runCorrelationEngine(events: IntelEvent[]): CorrelationAlert[] {
         timestamp: new Date().toISOString(),
         confidence: confidence(55, polEvents.length - 3),
       })
+    }
+  }
+
+  // 8. CASCADING FAILURE
+  const compoundCountries = alerts
+    .filter(a => a.pattern === 'Compound Crisis')
+    .map(a => a.countries[0])
+
+  for (const country of compoundCountries) {
+    const neighbors = COUNTRY_NEIGHBORS[country] || []
+    const neighborsWithConflict = neighbors.filter(neighbor => {
+      const neighborEvents = (byCountry[neighbor] || []).filter(
+        e => e.category === 'conflict' && withinHours(e, 168)
+      )
+      return neighborEvents.length > 0
+    })
+    if (neighborsWithConflict.length >= 2) {
+      const sample = (byCountry[country] || []).find(e => e.lat)
+      alerts.push({
+        id: makeId('cascading', country),
+        title: `Cascading Failure Risk — ${country} + Neighbors`,
+        summary: `${country} compound crisis with active conflict in ${neighborsWithConflict.length} neighboring states (${neighborsWithConflict.join(', ')}), indicating systemic regional breakdown.`,
+        severity: 'critical',
+        pattern: 'Cascading Failure',
+        signals: [
+          `Compound crisis active in ${country}`,
+          ...neighborsWithConflict.map(n => `Conflict events in neighboring ${n}`),
+        ],
+        countries: [country, ...neighborsWithConflict],
+        lat: sample?.lat || 0,
+        lon: sample?.lon || 0,
+        timestamp: new Date().toISOString(),
+        confidence: confidence(70, neighborsWithConflict.length - 2),
+      })
+    }
+  }
+
+  // 9. CROSS-BORDER SPILLOVER
+  for (const [countryA, eventsA] of Object.entries(byCountry)) {
+    const conflictA = eventsA.filter(e => e.category === 'conflict' && withinHours(e, 336))
+    if (conflictA.length === 0) continue
+    const neighbors = COUNTRY_NEIGHBORS[countryA] || []
+    for (const countryB of neighbors) {
+      const eventsB = byCountry[countryB] || []
+      const humB = eventsB.filter(
+        e => (e.category === 'humanitarian' || e.category === 'disaster') && withinHours(e, 336)
+      )
+      if (humB.length >= 1) {
+        const sampleA = conflictA.find(e => e.lat)
+        const sampleB = humB.find(e => e.lat)
+        alerts.push({
+          id: makeId('spillover', `${countryA}-${countryB}`),
+          title: `Cross-Border Spillover — ${countryA} → ${countryB}`,
+          summary: `${countryA} conflict driving humanitarian impact in neighboring ${countryB}. ${conflictA.length} conflict events correlated with ${humB.length} humanitarian events.`,
+          severity: 'high',
+          pattern: 'Cross-Border Spillover',
+          signals: [
+            ...conflictA.slice(0, 2).map(e => `[${countryA}] ${e.title}`),
+            ...humB.slice(0, 2).map(e => `[${countryB}] ${e.title}`),
+          ],
+          countries: [countryA, countryB],
+          lat: sampleA?.lat || sampleB?.lat || 0,
+          lon: sampleA?.lon || sampleB?.lon || 0,
+          timestamp: new Date().toISOString(),
+          confidence: confidence(60, conflictA.length + humB.length - 2),
+        })
+      }
     }
   }
 

@@ -1,10 +1,11 @@
 'use client'
 import { useRef, useCallback, useEffect, useState } from 'react'
-import Map, { Marker, Popup, NavigationControl, type MapRef } from 'react-map-gl/mapbox'
+import Map, { Marker, Popup, NavigationControl, Source, Layer, type MapRef } from 'react-map-gl/mapbox'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { useMapStore } from '@/stores/mapStore'
 import { IntelEvent } from '@/types'
 import { SEVERITY_COLORS, CHOKEPOINTS } from '@/lib/constants'
+import { MAJOR_CABLES } from '@/lib/cables'
 import { formatDistanceToNow } from 'date-fns'
 import LayerControls from './LayerControls'
 import PlotsLayer from './PlotsLayer'
@@ -90,6 +91,21 @@ export default function ArgusMap() {
                 title={`${cp.name}: ${cp.description}`}
               />
             </Marker>
+          ))}
+
+          {layers.cables && MAJOR_CABLES.map(cable => (
+            <Source key={cable.name} type="geojson" data={{
+              type: 'Feature' as const,
+              geometry: { type: 'LineString' as const, coordinates: cable.coordinates },
+              properties: { name: cable.name },
+            }}>
+              <Layer type="line" paint={{
+                'line-color': cable.color,
+                'line-width': 1.5,
+                'line-opacity': 0.55,
+                'line-dasharray': [2, 1.5],
+              }} />
+            </Source>
           ))}
 
           {filteredEvents.slice(0, 200).map(event => (

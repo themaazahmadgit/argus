@@ -65,3 +65,27 @@ export const FRAGILITY_SCORES: Record<string, number> = {
   BR: 60, ZA: 65, BD: 72, VN: 45, TH: 60, GH: 55,
   KE: 68, TZ: 50, UZ: 55, KZ: 50,
 }
+
+
+export const COUNTRY_NEIGHBORS: Record<string, string[]> = {
+  'Ukraine': ['Russia', 'Belarus', 'Poland', 'Romania', 'Moldova'],
+  'Russia': ['Ukraine', 'Belarus', 'Georgia', 'Finland', 'China'],
+  'Israel': ['Palestine', 'Lebanon', 'Syria', 'Egypt', 'Jordan'],
+  'Iran': ['Iraq', 'Afghanistan', 'Pakistan', 'Turkey', 'Azerbaijan'],
+  'Sudan': ['South Sudan', 'Ethiopia', 'Egypt', 'Libya', 'Chad'],
+  'Myanmar': ['Thailand', 'India', 'China', 'Bangladesh', 'Laos'],
+  'Syria': ['Turkey', 'Iraq', 'Lebanon', 'Israel', 'Jordan'],
+  'Yemen': ['Saudi Arabia', 'Oman'],
+  'Ethiopia': ['Somalia', 'Sudan', 'South Sudan', 'Kenya', 'Eritrea'],
+  'Somalia': ['Ethiopia', 'Kenya', 'Djibouti'],
+  'Nigeria': ['Niger', 'Chad', 'Cameroon', 'Benin'],
+  'Mali': ['Niger', 'Algeria', 'Mauritania', 'Senegal', 'Burkina Faso'],
+  'Pakistan': ['India', 'Afghanistan', 'Iran', 'China'],
+  'Afghanistan': ['Pakistan', 'Iran', 'Tajikistan', 'Uzbekistan'],
+  'Iraq': ['Syria', 'Iran', 'Turkey', 'Kuwait', 'Saudi Arabia', 'Jordan'],
+  'Lebanon': ['Syria', 'Israel'],
+  'North Korea': ['South Korea', 'China', 'Russia'],
+  'Taiwan': ['China', 'Philippines', 'Japan'],
+  'Colombia': ['Venezuela', 'Ecuador', 'Peru', 'Panama', 'Brazil'],
+  'Venezuela': ['Colombia', 'Brazil', 'Guyana'],
+}
