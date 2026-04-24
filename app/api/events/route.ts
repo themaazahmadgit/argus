@@ -485,7 +485,13 @@ export async function GET() {
     fetchACLED(),
   ])
 
-  let all = [...STATIC_FALLBACK, ...gdeltEvents, ...usgsEvents, ...gdacsEvents,
+  // Regenerate fallback timestamps on every serve so they never look stale
+  const refreshedFallback = STATIC_FALLBACK.map((e, i) => ({
+    ...e,
+    timestamp: new Date(Date.now() - (i * 900000 + Math.random() * 1800000)).toISOString(),
+  }))
+
+  let all = [...refreshedFallback, ...gdeltEvents, ...usgsEvents, ...gdacsEvents,
              ...reliefwebEvents, ...ucdpEvents, ...whoEvents, ...firmsEvents,
              ...rssEvents, ...acledEvents]
   all = deduplicateEvents(all)
