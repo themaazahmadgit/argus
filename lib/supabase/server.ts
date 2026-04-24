@@ -14,6 +14,7 @@ export async function createClient() {
   const { createServerClient } = await import('@supabase/ssr')
   const cookieStore = await cookies()
   return createServerClient(url, anon, {
+    cookieOptions: { sameSite: 'lax' },
     cookies: {
       getAll() { return cookieStore.getAll() },
       setAll(cookiesToSet: { name: string; value: string; options: Record<string, unknown> }[]) {
