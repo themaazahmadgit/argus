@@ -22,7 +22,8 @@ export async function fetchGDELTEvents(): Promise<IntelEvent[]> {
 
   try {
     const urls = [
-      'https://api.gdeltproject.org/api/v2/doc/doc?query=conflict%20OR%20crisis%20OR%20attack%20OR%20war%20OR%20missile&mode=artlist&maxrecords=50&format=json&timespan=24h',
+      'https://api.gdeltproject.org/api/v2/doc/doc?query=conflict%20OR%20crisis%20OR%20attack%20OR%20war%20OR%20missile&mode=artlist&maxrecords=50&format=json&timespan=48h',
+      'https://api.gdeltproject.org/api/v2/gkg/doc?query=conflict%20OR%20crisis%20OR%20attack%20OR%20war&mode=artlist&maxrecords=50&format=json&timespan=48h',
     ]
 
     for (const url of urls) {
