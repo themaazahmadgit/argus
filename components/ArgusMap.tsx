@@ -5,7 +5,6 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import { useMapStore } from '@/stores/mapStore'
 import { IntelEvent } from '@/types'
 import { SEVERITY_COLORS, CHOKEPOINTS } from '@/lib/constants'
-import { MAJOR_CABLES } from '@/lib/cables'
 import { formatDistanceToNow } from 'date-fns'
 import LayerControls from './LayerControls'
 import PlotsLayer from './PlotsLayer'
@@ -16,7 +15,15 @@ export default function ArgusMap() {
   const mapRef = useRef<MapRef>(null)
   const { viewport, setViewport, events, layers, setSelectedCountry, setSelectedEvent, selectedEvent, setFlyToCallback } = useMapStore()
   const [hoveredEvent, setHoveredEvent] = useState<IntelEvent | null>(null)
+  const [cablesGeoJSON, setCablesGeoJSON] = useState<object | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    fetch('/data/cables.json')
+      .then(r => r.json())
+      .then(setCablesGeoJSON)
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     setFlyToCallback((lat, lon, zoom) => {
@@ -93,20 +100,19 @@ export default function ArgusMap() {
             </Marker>
           ))}
 
-          {layers.cables && MAJOR_CABLES.map(cable => (
-            <Source key={cable.name} type="geojson" data={{
-              type: 'Feature' as const,
-              geometry: { type: 'LineString' as const, coordinates: cable.coordinates },
-              properties: { name: cable.name },
-            }}>
-              <Layer type="line" paint={{
-                'line-color': cable.color,
-                'line-width': 1.5,
-                'line-opacity': 0.55,
-                'line-dasharray': [2, 1.5],
-              }} />
+          {layers.cables && cablesGeoJSON && (
+            <Source id="submarine-cables" type="geojson" data={cablesGeoJSON as GeoJSON.FeatureCollection}>
+              <Layer
+                id="submarine-cables-layer"
+                type="line"
+                paint={{
+                  'line-color': ['coalesce', ['get', 'color'], '#6366f1'],
+                  'line-width': 1,
+                  'line-opacity': 0.5,
+                }}
+              />
             </Source>
-          ))}
+          )}
 
           {filteredEvents.slice(0, 200).map(event => (
             <Marker
