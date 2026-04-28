@@ -19,10 +19,13 @@ export default function ArgusMap() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    fetch('/data/cables.json')
+    fetch('/api/cables')
       .then(r => r.json())
       .then(setCablesGeoJSON)
-      .catch(() => {})
+      .catch(() => {
+        // fallback to bundled static file
+        fetch('/data/cables.json').then(r => r.json()).then(setCablesGeoJSON).catch(() => {})
+      })
   }, [])
 
   useEffect(() => {
