@@ -47,6 +47,7 @@ interface MapStore {
   panels: Panels
   eventFilter: string
   searchQuery: string
+  darkMode: boolean
   plottingMode: 'none' | 'point' | 'zone' | 'draw' | 'zone-builder'
   pendingPlotGeometry: unknown
   flyTo: (lat: number, lon: number, zoom?: number) => void
@@ -64,6 +65,7 @@ interface MapStore {
   setPlottingMode: (mode: MapStore['plottingMode']) => void
   setPendingPlotGeometry: (geo: unknown) => void
   setSelectedEvent: (event: IntelEvent | null) => void
+  toggleDarkMode: () => void
   _flyToCallback: ((lat: number, lon: number, zoom?: number) => void) | null
   setFlyToCallback: (cb: (lat: number, lon: number, zoom?: number) => void) => void
 }
@@ -84,6 +86,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
     eventFeed: true, country: false, brief: false, alerts: false, situations: false,
     countries: false, commodities: false, compare: false, commandBar: false, authModal: false,
   },
+  darkMode: false,
   eventFilter: 'all',
   searchQuery: '',
   plottingMode: 'none',
@@ -124,5 +127,6 @@ export const useMapStore = create<MapStore>((set, get) => ({
   setPlottingMode: (mode) => set({ plottingMode: mode }),
   setPendingPlotGeometry: (geo) => set({ pendingPlotGeometry: geo }),
   setSelectedEvent: (event) => set({ selectedEvent: event }),
+  toggleDarkMode: () => set(s => ({ darkMode: !s.darkMode })),
   setFlyToCallback: (cb) => set({ _flyToCallback: cb }),
 }))
