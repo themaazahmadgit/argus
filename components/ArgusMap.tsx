@@ -1,6 +1,6 @@
 'use client'
 import { useRef, useCallback, useEffect, useState } from 'react'
-import Map, { Marker, Popup, NavigationControl, Source, Layer, type MapRef } from 'react-map-gl/mapbox'
+import Map, { Marker, Popup, NavigationControl, Source, Layer, type MapRef, type MapMouseEvent } from 'react-map-gl/mapbox'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { useMapStore } from '@/stores/mapStore'
 import { IntelEvent } from '@/types'
@@ -11,12 +11,17 @@ import PlotsLayer from './PlotsLayer'
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || ''
 
+type MapPopup =
+  | { kind: 'cable'; name: string; lng: number; lat: number }
+  | { kind: 'landing'; cables: string[]; cable_count: number; lng: number; lat: number }
+
 export default function ArgusMap() {
   const mapRef = useRef<MapRef>(null)
   const { viewport, setViewport, events, layers, setSelectedCountry, setSelectedEvent, selectedEvent, setFlyToCallback } = useMapStore()
   const [hoveredEvent, setHoveredEvent] = useState<IntelEvent | null>(null)
   const [cablesGeoJSON, setCablesGeoJSON] = useState<object | null>(null)
   const [landingPointsGeoJSON, setLandingPointsGeoJSON] = useState<object | null>(null)
+  const [mapPopup, setMapPopup] = useState<MapPopup | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -42,8 +47,31 @@ export default function ArgusMap() {
     })
   }, [setFlyToCallback])
 
-  const handleMapClick = useCallback((e: { lngLat: { lng: number; lat: number } }) => {
+  const handleMapClick = useCallback((e: MapMouseEvent) => {
     if (!TOKEN) return
+
+    // Check if click hit a cable or landing point layer first
+    const features = e.features
+    if (features && features.length > 0) {
+      const feature = features[0]
+      const { lng, lat } = e.lngLat
+      const layerId = feature.layer?.id
+      const props = (feature.properties ?? {}) as Record<string, unknown>
+
+      if (layerId === 'landing-points-layer') {
+        const cables = JSON.parse(String(props.cables || '[]')) as string[]
+        setMapPopup({ kind: 'landing', cables, cable_count: Number(props.cable_count || 0), lng, lat })
+        return
+      }
+
+      if (layerId === 'submarine-cables-layer') {
+        setMapPopup({ kind: 'cable', name: String(props.name || 'Submarine Cable'), lng, lat })
+        return
+      }
+    }
+
+    // No layer hit — reverse geocode for country
+    setMapPopup(null)
     const { lng, lat } = e.lngLat
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(async () => {
@@ -60,11 +88,21 @@ export default function ArgusMap() {
     }, 280)
   }, [])
 
+  const handleMouseMove = useCallback((e: MapMouseEvent) => {
+    const features = e.features
+    const canvas = mapRef.current?.getCanvas()
+    if (canvas) canvas.style.cursor = features && features.length > 0 ? 'pointer' : ''
+  }, [])
+
   const filteredEvents = events.filter(e => {
     if (!layers.events) return false
     if (!layers.disasters && (e.category === 'disaster' || e.category === 'earthquake')) return false
     return true
   })
+
+  const interactiveLayerIds: string[] = []
+  if (layers.cables && cablesGeoJSON) interactiveLayerIds.push('submarine-cables-layer')
+  if (layers.landingPoints && landingPointsGeoJSON) interactiveLayerIds.push('landing-points-layer')
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#1d4ed8', overflow: 'hidden' }}>
@@ -91,6 +129,8 @@ export default function ArgusMap() {
           bearing={viewport.bearing}
           onMove={(evt: { viewState: { latitude: number; longitude: number; zoom: number; pitch: number; bearing: number } }) => setViewport(evt.viewState)}
           onClick={handleMapClick}
+          onMouseMove={handleMouseMove}
+          interactiveLayerIds={interactiveLayerIds}
           style={{ width: '100%', height: '100%' }}
           fog={{
             color: 'white',
@@ -145,6 +185,41 @@ export default function ArgusMap() {
                 }}
               />
             </Source>
+          )}
+
+          {/* Cable / landing point popup */}
+          {mapPopup && (
+            <Popup
+              latitude={mapPopup.lat}
+              longitude={mapPopup.lng}
+              closeButton
+              closeOnClick={false}
+              onClose={() => setMapPopup(null)}
+              anchor="bottom"
+              offset={[0, -8] as [number, number]}
+            >
+              {mapPopup.kind === 'cable' && (
+                <div style={{ padding: '8px 10px', minWidth: 180 }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Submarine Cable</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#0F172A', lineHeight: 1.4 }}>{mapPopup.name}</div>
+                </div>
+              )}
+              {mapPopup.kind === 'landing' && (
+                <div style={{ padding: '8px 10px', minWidth: 200, maxWidth: 260 }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: '#0891B2', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
+                    Landing Station · {mapPopup.cable_count} cable{mapPopup.cable_count !== 1 ? 's' : ''}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {mapPopup.cables.map((c, i) => (
+                      <div key={i} style={{ fontSize: 11, color: '#334155', lineHeight: 1.4 }}>{c}</div>
+                    ))}
+                    {mapPopup.cable_count > mapPopup.cables.length && (
+                      <div style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>+{mapPopup.cable_count - mapPopup.cables.length} more</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </Popup>
           )}
 
           {filteredEvents.slice(0, 200).map(event => (
