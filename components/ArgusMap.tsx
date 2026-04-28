@@ -58,13 +58,13 @@ export default function ArgusMap() {
       const layerId = feature.layer?.id
       const props = (feature.properties ?? {}) as Record<string, unknown>
 
-      if (layerId === 'landing-points-layer') {
+      if (layerId === 'landing-points-layer' || layerId === 'landing-points-hit') {
         const cables = JSON.parse(String(props.cables || '[]')) as string[]
         setMapPopup({ kind: 'landing', cables, cable_count: Number(props.cable_count || 0), lng, lat })
         return
       }
 
-      if (layerId === 'submarine-cables-layer') {
+      if (layerId === 'submarine-cables-layer' || layerId === 'submarine-cables-hit') {
         setMapPopup({ kind: 'cable', name: String(props.name || 'Submarine Cable'), lng, lat })
         return
       }
@@ -101,8 +101,8 @@ export default function ArgusMap() {
   })
 
   const interactiveLayerIds: string[] = []
-  if (layers.cables && cablesGeoJSON) interactiveLayerIds.push('submarine-cables-layer')
-  if (layers.landingPoints && landingPointsGeoJSON) interactiveLayerIds.push('landing-points-layer')
+  if (layers.cables && cablesGeoJSON) interactiveLayerIds.push('submarine-cables-hit', 'submarine-cables-layer')
+  if (layers.landingPoints && landingPointsGeoJSON) interactiveLayerIds.push('landing-points-hit', 'landing-points-layer')
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#1d4ed8', overflow: 'hidden' }}>
@@ -153,6 +153,7 @@ export default function ArgusMap() {
 
           {layers.cables && cablesGeoJSON && (
             <Source id="submarine-cables" type="geojson" data={cablesGeoJSON as GeoJSON.FeatureCollection}>
+              {/* Visible line */}
               <Layer
                 id="submarine-cables-layer"
                 type="line"
@@ -162,11 +163,30 @@ export default function ArgusMap() {
                   'line-opacity': 0.5,
                 }}
               />
+              {/* Wide invisible hit area — makes clicking cables actually work */}
+              <Layer
+                id="submarine-cables-hit"
+                type="line"
+                paint={{
+                  'line-width': 12,
+                  'line-opacity': 0,
+                }}
+              />
             </Source>
           )}
 
           {layers.landingPoints && landingPointsGeoJSON && (
             <Source id="landing-points" type="geojson" data={landingPointsGeoJSON as GeoJSON.FeatureCollection}>
+              {/* Wider invisible hit area under the dot */}
+              <Layer
+                id="landing-points-hit"
+                type="circle"
+                paint={{
+                  'circle-radius': 14,
+                  'circle-opacity': 0,
+                  'circle-stroke-width': 0,
+                }}
+              />
               <Layer
                 id="landing-points-layer"
                 type="circle"

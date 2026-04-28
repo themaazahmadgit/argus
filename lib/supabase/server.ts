@@ -15,6 +15,13 @@ export async function createClient() {
   const cookieStore = await cookies()
   return createServerClient(url, anon, {
     cookieOptions: { sameSite: 'lax' },
+    auth: {
+      // Server-side: never auto-refresh — that's what causes lock contention
+      // across concurrent requests fighting over the same auth-token cookie.
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false,
+    },
     cookies: {
       getAll() { return cookieStore.getAll() },
       setAll(cookiesToSet: { name: string; value: string; options: Record<string, unknown> }[]) {
