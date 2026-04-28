@@ -15,7 +15,7 @@ const CABLE_THREAT_KM = 40 // events within this distance highlight a cable as a
 
 type CableInfo = {
   id: string; name: string; length?: string; rfs?: string; is_planned?: boolean
-  owners?: string[]; landing_points?: { name: string; country: string }[]; url?: string; notes?: string
+  owners?: string[] | string; landing_points?: { name: string; country: string }[]; url?: string; notes?: string
 }
 
 type MapPopup =
@@ -316,10 +316,14 @@ export default function ArgusMap() {
                       {cableInfo.rfs && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 10, color: '#94A3B8' }}>Ready for Service</span><span style={{ fontSize: 10, fontWeight: 600, color: '#334155' }}>{cableInfo.rfs}</span></div>}
                       {cableInfo.is_planned && <div style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600 }}>Planned / Under Construction</div>}
                       {cableInfo.landing_points && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 10, color: '#94A3B8' }}>Landing Points</span><span style={{ fontSize: 10, fontWeight: 600, color: '#334155' }}>{cableInfo.landing_points.length}</span></div>}
-                      {cableInfo.owners && cableInfo.owners.length > 0 && (
+                      {cableInfo.owners && (
                         <div style={{ marginTop: 4 }}>
                           <div style={{ fontSize: 9, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>Owners</div>
-                          <div style={{ fontSize: 10, color: '#334155', lineHeight: 1.5 }}>{cableInfo.owners.slice(0, 4).join(', ')}{cableInfo.owners.length > 4 ? ` +${cableInfo.owners.length - 4} more` : ''}</div>
+                          <div style={{ fontSize: 10, color: '#334155', lineHeight: 1.5 }}>
+                            {Array.isArray(cableInfo.owners)
+                              ? cableInfo.owners.slice(0, 4).join(', ') + (cableInfo.owners.length > 4 ? ` +${cableInfo.owners.length - 4} more` : '')
+                              : String(cableInfo.owners)}
+                          </div>
                         </div>
                       )}
                       {cableInfo.url && (
