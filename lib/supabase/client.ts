@@ -45,9 +45,16 @@ const mockClient = {
 } as unknown as ReturnType<typeof createBrowserClient>
 
 // Single instance created once at module load time — never recreated.
-// Multiple createBrowserClient calls cause lock contention on the auth token.
+// auth.lock is overridden with a no-op to bypass the Web Locks API entirely.
+// The default implementation uses navigator.locks which causes
+// "lock was released because another request stole it" when multiple
+// in-flight requests race to refresh the same auth token simultaneously.
 const supabase = SUPABASE_URL && SUPABASE_ANON
-  ? createBrowserClient(SUPABASE_URL, SUPABASE_ANON)
+  ? createBrowserClient(SUPABASE_URL, SUPABASE_ANON, {
+      auth: {
+        lock: <R>(_name: string, _acquireTimeout: number, fn: () => Promise<R>): Promise<R> => fn(),
+      },
+    })
   : mockClient
 
 export function createClient() {
