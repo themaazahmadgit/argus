@@ -16,6 +16,7 @@ export default function ArgusMap() {
   const { viewport, setViewport, events, layers, setSelectedCountry, setSelectedEvent, selectedEvent, setFlyToCallback } = useMapStore()
   const [hoveredEvent, setHoveredEvent] = useState<IntelEvent | null>(null)
   const [cablesGeoJSON, setCablesGeoJSON] = useState<object | null>(null)
+  const [landingPointsGeoJSON, setLandingPointsGeoJSON] = useState<object | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -23,10 +24,17 @@ export default function ArgusMap() {
       .then(r => r.json())
       .then(setCablesGeoJSON)
       .catch(() => {
-        // fallback to bundled static file
         fetch('/data/cables.json').then(r => r.json()).then(setCablesGeoJSON).catch(() => {})
       })
   }, [])
+
+  useEffect(() => {
+    if (!layers.landingPoints || landingPointsGeoJSON) return
+    fetch('/data/landing-points.json')
+      .then(r => r.json())
+      .then(setLandingPointsGeoJSON)
+      .catch(() => {})
+  }, [layers.landingPoints, landingPointsGeoJSON])
 
   useEffect(() => {
     setFlyToCallback((lat, lon, zoom) => {
@@ -112,6 +120,28 @@ export default function ArgusMap() {
                   'line-color': ['coalesce', ['get', 'color'], '#6366f1'],
                   'line-width': 1,
                   'line-opacity': 0.5,
+                }}
+              />
+            </Source>
+          )}
+
+          {layers.landingPoints && landingPointsGeoJSON && (
+            <Source id="landing-points" type="geojson" data={landingPointsGeoJSON as GeoJSON.FeatureCollection}>
+              <Layer
+                id="landing-points-layer"
+                type="circle"
+                paint={{
+                  'circle-radius': [
+                    'interpolate', ['linear'], ['get', 'cable_count'],
+                    1, 3,
+                    3, 4.5,
+                    6, 6,
+                    10, 8,
+                  ],
+                  'circle-color': '#1e293b',
+                  'circle-stroke-width': 1.5,
+                  'circle-stroke-color': '#ffffff',
+                  'circle-opacity': 0.85,
                 }}
               />
             </Source>

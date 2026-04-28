@@ -17,6 +17,7 @@ interface Layers {
   aviation: boolean
   vessels: boolean
   cables: boolean
+  landingPoints: boolean
   pipelines: boolean
   plots: boolean
 }
@@ -77,7 +78,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
   situations: [],
   layers: {
     events: true, disasters: true, chokepoints: true, alerts: true,
-    aviation: false, vessels: false, cables: false, pipelines: false, plots: true,
+    aviation: false, vessels: false, cables: false, landingPoints: false, pipelines: false, plots: true,
   },
   panels: {
     eventFeed: true, country: false, brief: false, alerts: false, situations: false,

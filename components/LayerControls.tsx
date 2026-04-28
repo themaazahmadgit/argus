@@ -9,6 +9,7 @@ const LAYERS = [
   { key: 'chokepoints', label: 'Chokepoints' },
   { key: 'alerts', label: 'Alerts' },
   { key: 'cables', label: 'Cables' },
+  { key: 'landingPoints', label: 'Landings' },
   { key: 'aviation', label: 'Aviation' },
   { key: 'vessels', label: 'Vessels' },
   { key: 'plots', label: 'Plots' },
