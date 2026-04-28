@@ -11,7 +11,7 @@ import LayerControls from './LayerControls'
 import PlotsLayer from './PlotsLayer'
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || ''
-const CABLE_THREAT_KM = 150 // events within this distance highlight a cable as at-risk
+const CABLE_THREAT_KM = 40 // events within this distance highlight a cable as at-risk
 
 type CableInfo = {
   id: string; name: string; length?: string; rfs?: string; is_planned?: boolean
@@ -59,7 +59,8 @@ export default function ArgusMap() {
       setThreatenedCableIds(new Set())
       return
     }
-    const activeEvents = events.filter(e => e.severity === 'critical' || e.severity === 'high')
+    // Only critical events directly on or next to a cable — not broad conflict zones
+    const activeEvents = events.filter(e => e.severity === 'critical')
     if (activeEvents.length === 0) { setThreatenedCableIds(new Set()); return }
 
     const threatened = new Set<string>()
